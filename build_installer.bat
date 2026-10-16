@@ -26,6 +26,7 @@ if not exist "dist-nuitka-standalone\monitor_controller.dist\MonitorToolbox.exe"
     --include-data-files=assets/runtime/AdbWinUsbApi.dll=assets/runtime/AdbWinUsbApi.dll ^
     --include-data-files=assets/runtime/MtkDirectTool.jar=assets/runtime/MtkDirectTool.jar ^
     --include-data-files=assets/runtime/ColorfulLedTool.jar=assets/runtime/ColorfulLedTool.jar ^
+    --include-data-files=assets/runtime/dimming_memory.sh=assets/runtime/dimming_memory.sh ^
     --include-data-files=assets/adb_guardian/adbguardian-signed.apk=assets/adb_guardian/adbguardian-signed.apk ^
     --output-filename=MonitorToolbox.exe ^
     --output-dir=dist-nuitka-standalone ^

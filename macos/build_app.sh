@@ -126,6 +126,14 @@ for jar in MtkDirectTool.jar ColorfulLedTool.jar; do
     fi
 done
 
+DIMMING_SCRIPT="$REPO_ROOT/assets/runtime/dimming_memory.sh"
+if [ -f "$DIMMING_SCRIPT" ]; then
+    cp "$DIMMING_SCRIPT" "$RES_DIR/runtime/dimming_memory.sh"
+    echo "    已内嵌 dimming_memory.sh（显示器端控光守护）"
+else
+    echo "    警告：未找到 assets/runtime/dimming_memory.sh（显示器端控光守护不可用）"
+fi
+
 GUARDIAN_APK="$REPO_ROOT/assets/adb_guardian/adbguardian-signed.apk"
 if [ -f "$GUARDIAN_APK" ]; then
     cp "$GUARDIAN_APK" "$RES_DIR/adb_guardian/adbguardian-signed.apk"

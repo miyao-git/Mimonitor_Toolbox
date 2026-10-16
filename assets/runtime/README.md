@@ -7,9 +7,13 @@ MonitorToolbox at runtime.
 - `AdbWinApi.dll` and `AdbWinUsbApi.dll`: Windows ADB runtime libraries.
 - `MtkDirectTool.jar`: Helper jar pushed to the display for MTK JNI calls.
 - `ColorfulLedTool.jar`: Helper jar used to call MiTV PM2 colorful LED HIDL.
+- `dimming_memory.sh`: Display-side daemon that remembers the precision-dimming
+  level per HDR/SDR state (pushed to `/sdcard/Download/Mimonitor_Toolbox/`
+  and started by the desktop apps on connect).
 
 Keep these files in this directory so local builds and GitHub Actions use the
 same resource layout.
 
 Source for `MtkDirectTool.jar` is kept in `tools/mtk_direct/`.
 Source for `ColorfulLedTool.jar` is kept in `tools/colorful_led/`.
+Source for `dimming_memory.sh` is kept in `tools/dimming_memory/` (with install.sh and docs).

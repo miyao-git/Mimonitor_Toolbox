@@ -26,6 +26,52 @@ from mimonitor_toolbox import main_window
 from mimonitor_toolbox.network_scan import ProbeResult
 
 
+class BundledAssetTests(unittest.TestCase):
+    """打包资源必须与源码一致：assets/runtime 里那份是给 Nuitka 用的副本。"""
+
+    def test_bundled_dimming_memory_script_matches_tools_copy(self):
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(repo_root, "tools", "dimming_memory", "dimming_memory.sh"),
+                  "r", encoding="utf-8") as handle:
+            source_text = handle.read()
+        with open(os.path.join(repo_root, "assets", "runtime", "dimming_memory.sh"),
+                  "r", encoding="utf-8") as handle:
+            bundled_text = handle.read()
+
+        self.assertEqual(bundled_text, source_text)
+
+    def test_runtime_assets_are_referenced_by_windows_packaging(self):
+        """assets/runtime 里的每个文件都得被 Windows 打包脚本显式带上，
+        否则会静默漏进产物（dimming_memory.sh 就差点漏掉）。"""
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        names = sorted(
+            name for name in os.listdir(os.path.join(repo_root, "assets", "runtime"))
+            if name != "README.md"
+            and os.path.isfile(os.path.join(repo_root, "assets", "runtime", name))
+        )
+        targets = [
+            "build.bat",
+            "build_installer.bat",
+            "build_nuitka_standalone.bat",
+            os.path.join(".github", "workflows", "build.yml"),
+        ]
+        for target in targets:
+            with open(os.path.join(repo_root, target), "rb") as handle:
+                text = handle.read().decode("utf-8", errors="replace")
+            for name in names:
+                self.assertIn(name, text, f"{target} 没有引用 assets/runtime/{name}")
+
+    def test_macos_build_embeds_shared_runtime_assets(self):
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        shared = ["dimming_memory.sh", "MtkDirectTool.jar", "ColorfulLedTool.jar"]
+        for target in [os.path.join("macos", "build_app.sh"),
+                       os.path.join(".github", "workflows", "macos.yml")]:
+            with open(os.path.join(repo_root, target), "r", encoding="utf-8") as handle:
+                text = handle.read()
+            for name in shared:
+                self.assertIn(name, text, f"{target} 没有引用 {name}")
+
+
 class FakePopen:
     active = 0
     max_active = 0
