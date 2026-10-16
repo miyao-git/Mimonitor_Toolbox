@@ -1367,5 +1367,104 @@ class NetworkSignatureTests(unittest.TestCase):
         self.assertEqual(signature[0][1], "vEthernet (External)")
 
 
+class DimmingMemoryDaemonTests(unittest.TestCase):
+    """连接后自动补拉显示器端控光守护（不依赖本机常驻）。"""
+
+    class FakeAdb:
+        def __init__(self, running, start_status=None):
+            self.running = running
+            self.start_status = start_status or {"running": True, "pid": "777"}
+            self.start_calls = 0
+
+        def transaction(self):
+            return nullcontext()
+
+        def dimming_memory_status(self):
+            return {"running": self.running, "pid": "777" if self.running else ""}
+
+        def start_dimming_memory_daemon(self):
+            self.start_calls += 1
+            return dict(self.start_status)
+
+    def _host(self, adb):
+        class Host(device_features.DeviceFeaturesMixin):
+            pass
+
+        host = Host()
+        host.adb = adb
+        host.logs = []
+        host.dimming_memory_status_signal = FakeSignal()
+        host.log = lambda message: host.logs.append(message)
+        return host
+
+    def test_ensure_skips_launch_when_switch_is_off(self):
+        adb = self.FakeAdb(running=False)
+        with mock.patch.object(device_features, "load_settings",
+                               return_value={"dimming_memory_daemon_enabled": False}), \
+                mock.patch.object(device_features, "async_run", lambda fn: fn()):
+            self._host(adb)._ensure_dimming_memory_daemon_async()
+
+        self.assertEqual(adb.start_calls, 0)
+
+    def test_ensure_launches_when_enabled_and_not_running(self):
+        adb = self.FakeAdb(running=False)
+        host = self._host(adb)
+        with mock.patch.object(device_features, "load_settings",
+                               return_value={"dimming_memory_daemon_enabled": True}), \
+                mock.patch.object(device_features, "async_run", lambda fn: fn()):
+            host._ensure_dimming_memory_daemon_async()
+
+        self.assertEqual(adb.start_calls, 1)
+        self.assertTrue(any("已启动" in line for line in host.logs))
+        self.assertTrue(host.dimming_memory_status_signal.events)
+
+    def test_ensure_leaves_running_daemon_alone(self):
+        adb = self.FakeAdb(running=True)
+        host = self._host(adb)
+        with mock.patch.object(device_features, "load_settings",
+                               return_value={"dimming_memory_daemon_enabled": True}), \
+                mock.patch.object(device_features, "async_run", lambda fn: fn()):
+            host._ensure_dimming_memory_daemon_async()
+
+        self.assertEqual(adb.start_calls, 0)
+        self.assertTrue(host.dimming_memory_status_signal.events)
+
+    def test_status_label_reports_pid_and_disabled_switch(self):
+        host = self._host(self.FakeAdb(running=True))
+        host.dimming_memory_status_label = SimpleNamespace(
+            setText=lambda text: setattr(host, "text", text),
+            setStyleSheet=lambda _style: None,
+        )
+
+        host._apply_dimming_memory_daemon_status(
+            {"running": True, "pid": "88", "enabled": True})
+        self.assertIn("运行中", host.text)
+        self.assertIn("88", host.text)
+
+        host._apply_dimming_memory_daemon_status(
+            {"running": True, "pid": "88", "enabled": False})
+        self.assertIn("开关未开", host.text)
+
+        host._apply_dimming_memory_daemon_status(
+            {"running": False, "pid": "", "enabled": True})
+        self.assertIn("未运行", host.text)
+
+    def test_toggle_persists_setting_and_launches(self):
+        from PyQt6.QtCore import Qt
+
+        adb = self.FakeAdb(running=False)
+        host = self._host(adb)
+        saved = {}
+        with mock.patch.object(device_features, "update_settings",
+                               side_effect=lambda values: saved.update(values)), \
+                mock.patch.object(device_features, "load_settings",
+                                  return_value={"dimming_memory_daemon_enabled": True}), \
+                mock.patch.object(device_features, "async_run", lambda fn: fn()):
+            host._toggle_dimming_memory_daemon(Qt.CheckState.Checked.value)
+
+        self.assertEqual(saved, {"dimming_memory_daemon_enabled": True})
+        self.assertEqual(adb.start_calls, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

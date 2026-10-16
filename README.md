@@ -110,6 +110,7 @@ service call TvService 3 s16 "sh -c eval\${IFS}CLASSPATH=...\${IFS}MtkDirectTool
 - 开机自启动最小化
 - 4K UI 模式（3840×2160 / DPI 640，需重启显示器）
 - ADB 保活守护部署与状态检测（内置 `assets/adb_guardian/adbguardian-signed.apk`）
+- 显示器端分区控光记忆：`assets/runtime/dimming_memory.sh` 部署到显示器后由显示器自己盯 `picture_mode`，HDR/SDR 各记一档精密控光 —— 连上显示器时自动补拉，Mac/PC 关机也照常生效（源码见 `tools/dimming_memory/`）
 - 操作日志记录与导出
 
 ## 项目资源结构

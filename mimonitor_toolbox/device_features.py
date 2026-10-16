@@ -869,6 +869,7 @@ class DeviceFeaturesMixin:
                         self.status_signal.emit("已连接")
                         self.log(f"启动自动连接成功: {saved_ip}")
                         self.adb.check_and_heal_jar()
+                        self._ensure_dimming_memory_daemon_async()
                         if not self._connection_intent_is_current(intent_generation, saved_ip):
                             return
                         m = self.adb.get_model().strip()
@@ -914,6 +915,7 @@ class DeviceFeaturesMixin:
                         self.log(f"连接成功: {ip}")
                         update_settings({"saved_ip": ip})
                         self.adb.check_and_heal_jar()
+                        self._ensure_dimming_memory_daemon_async()
                         if not self._connection_intent_is_current(intent_generation, ip):
                             return
                         m = self.adb.get_model().strip()
@@ -1179,6 +1181,139 @@ class DeviceFeaturesMixin:
             color = "#d89614"
         label.setText(text)
         label.setStyleSheet(f"color: {color}; font-size: 13px;")
+
+    # ── 显示器端「HDR/SDR 精密控光记忆」守护 ──────────────────────
+    # 与「HDR/SDR 分区控光记忆」不同：逻辑跑在显示器里（shell 脚本常驻，盯
+    # picture_mode 在 HDR/SDR 之间切），不依赖本机常开。这里只负责连接后
+    # 确认它在跑、没跑就把它拉起来，以及界面上的状态显示与手动控制。
+    def _dimming_memory_daemon_enabled(self):
+        return bool(load_settings().get("dimming_memory_daemon_enabled", False))
+
+    def _read_dimming_memory_daemon_status(self):
+        status = self.adb.dimming_memory_status()
+        status["enabled"] = self._dimming_memory_daemon_enabled()
+        return status
+
+    def _apply_dimming_memory_daemon_status(self, status):
+        label = getattr(self, "dimming_memory_status_label", None)
+        if not label:
+            return
+        if "error" in status:
+            label.setText(f"状态：检测失败 - {status['error']}")
+            label.setStyleSheet("color: #ff6b5f; font-size: 13px;")
+            return
+        if status.get("busy"):
+            label.setText(f"状态：{status['busy']}")
+            label.setStyleSheet("color: #d89614; font-size: 13px;")
+            return
+        if status.get("running"):
+            text = f"状态：显示器端守护运行中（pid {status.get('pid') or '?'}）"
+            color = "#20c46b"
+            if not status.get("enabled", True):
+                text += "，但开关未开（不会自动补拉）"
+                color = "#d89614"
+        elif not status.get("installed", True):
+            text = "状态：脚本未部署"
+            color = "#d89614"
+        else:
+            text = "状态：守护未运行" + ("（下次连接自动拉起）" if status.get("enabled", True) else "")
+            color = "#d89614"
+        label.setText(text)
+        label.setStyleSheet(f"color: {color}; font-size: 13px;")
+
+    def _check_dimming_memory_daemon_status(self):
+        if not self.check_connection():
+            return
+        self.dimming_memory_status_signal.emit({"busy": "正在检测..."})
+
+        def do():
+            try:
+                with self.adb.transaction():
+                    status = self._read_dimming_memory_daemon_status()
+                self.dimming_memory_status_signal.emit(status)
+            except Exception as e:
+                self.dimming_memory_status_signal.emit({"error": str(e)})
+                self.log(f"控光守护状态检测失败: {e}")
+
+        async_run(do)
+
+    def _deploy_dimming_memory_daemon(self):
+        if not self.check_connection():
+            return
+        self.dimming_memory_status_signal.emit({"busy": "正在部署并启动..."})
+
+        def do():
+            try:
+                status = self.adb.start_dimming_memory_daemon()
+                if status.get("running"):
+                    self.log(f"控光守护已启动（pid {status.get('pid')}）")
+                else:
+                    self.log(f"控光守护启动失败: {status.get('error') or '未拿到 pid'}")
+                with self.adb.transaction():
+                    self.dimming_memory_status_signal.emit(
+                        self._read_dimming_memory_daemon_status())
+            except Exception as e:
+                self.dimming_memory_status_signal.emit({"error": str(e)})
+                self.log(f"部署控光守护失败: {e}")
+
+        async_run(do)
+
+    def _stop_dimming_memory_daemon(self):
+        if not self.check_connection():
+            return
+        self.dimming_memory_status_signal.emit({"busy": "正在停止..."})
+
+        def do():
+            try:
+                status = self.adb.stop_dimming_memory_daemon()
+                if status.get("running"):
+                    self.log("控光守护停止超时，进程仍在")
+                else:
+                    self.log("控光守护已停止")
+                with self.adb.transaction():
+                    self.dimming_memory_status_signal.emit(
+                        self._read_dimming_memory_daemon_status())
+            except Exception as e:
+                self.dimming_memory_status_signal.emit({"error": str(e)})
+                self.log(f"停止控光守护失败: {e}")
+
+        async_run(do)
+
+    def _toggle_dimming_memory_daemon(self, state):
+        try:
+            state_val = int(state)
+        except Exception:
+            state_val = getattr(state, "value", 0)
+        enabled = state_val == Qt.CheckState.Checked.value
+        update_settings({"dimming_memory_daemon_enabled": enabled})
+        self.log(f"显示器端分区控光记忆: {'开启' if enabled else '关闭'}")
+        if enabled:
+            self._ensure_dimming_memory_daemon_async()
+
+    def _ensure_dimming_memory_daemon_async(self):
+        """连接成功后调用：开关开着且守护没跑，就把它拉起来。
+
+        全程在后台线程跑，且**不**阻塞连接流程（拉起最坏要等几秒）。
+        """
+        if not self._dimming_memory_daemon_enabled():
+            return
+
+        def do():
+            try:
+                if not self.adb.dimming_memory_status()["running"]:
+                    self.log("显示器端控光守护未运行，正在拉起...")
+                    status = self.adb.start_dimming_memory_daemon()
+                    if status.get("running"):
+                        self.log(f"显示器端控光守护已启动（pid {status.get('pid')}）")
+                    else:
+                        self.log(f"显示器端控光守护拉起失败: {status.get('error') or '未拿到 pid'}")
+                with self.adb.transaction():
+                    self.dimming_memory_status_signal.emit(
+                        self._read_dimming_memory_daemon_status())
+            except Exception as e:
+                self.log(f"显示器端控光守护检查失败: {e}")
+
+        async_run(do)
 
     def _check_guardian_status(self):
         if not self.check_connection():

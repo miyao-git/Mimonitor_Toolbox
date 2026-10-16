@@ -119,6 +119,22 @@ struct ToolsView: View {
                     }
                 }
 
+                // 显示器端分区控光记忆（逻辑跑在显示器里，不依赖本机常开）
+                SectionCard(title: "显示器端分区控光记忆") {
+                    Toggle("把记忆逻辑部署到显示器（Mac 关机也能切）", isOn: Binding(
+                        get: { state.dimmingMemoryDaemonEnabled },
+                        set: { state.toggleDimmingMemoryDaemon($0) }
+                    ))
+                    Text(state.dimmingMemoryStatusText).font(.callout).foregroundColor(.secondary)
+                    Text("默认 SDR=关 / HDR=高，可在显示器 /sdcard/Download/Mimonitor_Toolbox/dimming_memory.conf 修改；在 OSD 上改控光会被自动记到当前那一侧。")
+                        .font(.caption).foregroundColor(.secondary)
+                    HStack(spacing: 8) {
+                        Button("检测状态") { state.checkDimmingMemoryStatus() }
+                        Button("部署并启动") { state.deployDimmingMemoryDaemon() }.buttonStyle(.borderedProminent)
+                        Button("停止守护") { state.stopDimmingMemoryDaemon() }
+                    }
+                }
+
                 // HDR / SDR 分区控光记忆
                 SectionCard(title: "HDR/SDR 分区控光记忆") {
                     Toggle("按信号分别记忆精密控光（基于 macOS EDR 判断 HDR）", isOn: Binding(

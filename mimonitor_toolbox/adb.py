@@ -9,10 +9,15 @@ import threading
 import time
 
 from .core import (
+    DIMMING_MEMORY_DIR,
+    DIMMING_MEMORY_PID_FILE,
+    DIMMING_MEMORY_SCRIPT,
+    DIMMING_MEMORY_STOP_FILE,
     MTK_BATCH_RESULT_FILE,
     bundled_resource_path,
     get_app_data_dir,
     get_colorful_led_tool_path,
+    get_dimming_memory_script_path,
     get_mtk_direct_tool_path,
     is_frozen_build,
     load_settings,
@@ -376,6 +381,86 @@ class Adb:
             get_colorful_led_tool_path(),
             check=check,
         )
+
+    # ── 显示器端控光守护（tools/dimming_memory）────────────────────
+    def dimming_memory_status(self):
+        """守护是否在跑：pid 文件 + /proc 校验（进程死了但 pid 文件没清也能认出来）。"""
+        out = self.shell(
+            f'p=$(cat {DIMMING_MEMORY_PID_FILE} 2>/dev/null); '
+            'if [ -n "$p" ] && [ -d "/proc/$p" ]; then echo "running $p"; else echo stopped; fi'
+        ).strip().replace("\r", "")
+        line = out.splitlines()[-1].strip() if out else ""
+        if line.startswith("running "):
+            return {"running": True, "pid": line.split(" ", 1)[1].strip()}
+        return {"running": False, "pid": ""}
+
+    def sync_dimming_memory_script(self, check=False):
+        """把守护脚本推到设备（大小不一致才推，和 jar 的 heal 同一个思路）。"""
+        local = get_dimming_memory_script_path()
+        if not local or not os.path.exists(local):
+            if check:
+                raise RuntimeError(f"找不到控光守护脚本：{local}")
+            _adb_log(f"WARNING: 本地未找到 {DIMMING_MEMORY_SCRIPT_NAME}")
+            return False
+        with self.transaction():
+            remote_lines = self.shell(
+                f"stat -c %s {DIMMING_MEMORY_SCRIPT} 2>/dev/null || echo 0"
+            ).strip().splitlines()
+            try:
+                remote_size = int(remote_lines[-1]) if remote_lines else 0
+            except (TypeError, ValueError):
+                remote_size = 0
+            local_size = os.path.getsize(local)
+            if remote_size != local_size:
+                adb_run(["-s", self.serial, "push", local, DIMMING_MEMORY_SCRIPT], check=check)
+            self.shell(
+                f"chmod 755 {DIMMING_MEMORY_SCRIPT}; mkdir -p {DIMMING_MEMORY_DIR}",
+            )
+        return True
+
+    def start_dimming_memory_daemon(self, timeout=8, check=False):
+        """拉起守护。返回拉起后的状态。
+
+        adb shell 起的后台进程会一直占着本地客户端的输出管道（实测），所以这条
+        命令一定会超时被杀 —— 被杀的只是**本地 adb 客户端**：脚本是 nohup 出去的，
+        远端照常活着（install.sh 用的是同一招）。因此这里显式接住超时，只看 pid 文件。
+        """
+        if not self.sync_dimming_memory_script(check=check):
+            return {"running": False, "pid": "", "error": "脚本未就绪"}
+        running = self.dimming_memory_status()
+        if running["running"]:
+            return running  # 已经在跑就别再拉一个（两个守护会互相抢着写）
+        with self.transaction():
+            self.shell(f"rm -f {DIMMING_MEMORY_STOP_FILE}")
+            command = (
+                f"cd {DIMMING_MEMORY_DIR} && nohup sh {DIMMING_MEMORY_SCRIPT} "
+                f">/dev/null 2>&1 </dev/null & echo started"
+            )
+            try:
+                adb_run(["-s", self.serial, "shell", command], timeout=3)
+            except RuntimeError:
+                pass  # 预期：本地客户端被超时杀掉，守护已脱离
+        deadline = time.time() + max(0.0, timeout)
+        while True:
+            status = self.dimming_memory_status()
+            if status["running"] or time.time() >= deadline:
+                return status
+            time.sleep(0.5)
+
+    def stop_dimming_memory_daemon(self, timeout=8):
+        """停下守护：写停止标记（脚本每轮都会看），等它自己退。"""
+        with self.transaction():
+            self.shell(f"echo stop > {DIMMING_MEMORY_STOP_FILE}")
+        deadline = time.time() + max(0.0, timeout)
+        while True:
+            status = self.dimming_memory_status()
+            if not status["running"]:
+                with self.transaction():
+                    self.shell(f"rm -f {DIMMING_MEMORY_STOP_FILE}")
+                return status
+            if time.time() >= deadline:
+                return status
+            time.sleep(0.5)
 
     def connect(self):
         # adb connect 客户端超时被杀时输出为空，但独立 ADB server 可能

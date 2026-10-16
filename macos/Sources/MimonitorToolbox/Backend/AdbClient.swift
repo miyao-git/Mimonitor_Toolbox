@@ -629,6 +629,94 @@ final class AdbClient {
         shell(buildTvserviceCommand(jar: jar, args: ["ColorfulLedTool", action] + args))
     }
 
+    // MARK: - 显示器端控光守护（tools/dimming_memory）
+
+    /// 守护脚本：打包进 .app 的 runtime/，开发态回退到仓库（assets/ → tools/）
+    static func dimmingMemoryScriptPath() -> String? {
+        if let url = Bundle.main.url(forResource: "dimming_memory", withExtension: "sh", subdirectory: "runtime") {
+            return url.path
+        }
+        if let bundled = runtimeResource("dimming_memory.sh") { return bundled }
+        let dev = repoRootURL().appendingPathComponent("tools/dimming_memory/dimming_memory.sh")
+        return FileManager.default.fileExists(atPath: dev.path) ? dev.path : nil
+    }
+
+    private static let dimmingMemoryDir = "/sdcard/Download/Mimonitor_Toolbox"
+    private static let dimmingMemoryScript = "/sdcard/Download/Mimonitor_Toolbox/dimming_memory.sh"
+    private static let dimmingMemoryPidFile = "/sdcard/Download/Mimonitor_Toolbox/dimming_memory.pid"
+    private static let dimmingMemoryStopFile = "/sdcard/Download/Mimonitor_Toolbox/dimming_memory.stop"
+
+    /// 守护是否在跑：pid 文件 + /proc 校验（进程死了但 pid 文件还在也能认出来）
+    func dimmingMemoryStatus() -> (running: Bool, pid: String) {
+        // 注意 \(...) 后面那个多出来的 ")"：Swift 的字符串插值会把紧跟的 ")" 当插值结尾吃掉，
+        // 所以 shell 里 $( ) 的收尾括号必须写两个（Swift 一个 + shell 一个）。
+        let out = shell("p=$(cat \(AdbClient.dimmingMemoryPidFile)) 2>/dev/null; "
+            + "if [ -n \"$p\" ] && [ -d \"/proc/$p\" ]; then echo \"running $p\"; else echo stopped; fi")
+        guard let line = out.split(separator: "\n").last.map(String.init)?
+            .trimmingCharacters(in: .whitespaces), line.hasPrefix("running ") else {
+            return (false, "")
+        }
+        return (true, String(line.dropFirst("running ".count)).trimmingCharacters(in: .whitespaces))
+    }
+
+    /// 把守护脚本推到设备（大小不一致才推，和 jar 的 heal 同一个思路）
+    @discardableResult
+    func syncDimmingMemoryScript() -> Bool {
+        guard let local = AdbClient.dimmingMemoryScriptPath() else {
+            return false
+        }
+        let sizeLines = shell("stat -c %s \(AdbClient.dimmingMemoryScript) 2>/dev/null || echo 0").split(separator: "\n")
+        let remoteSize = Int(sizeLines.last.map(String.init) ?? "0") ?? 0
+        var localSize = 0
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: local),
+           let n = attrs[.size] as? NSNumber {
+            localSize = n.intValue
+        }
+        if remoteSize != localSize {
+            run(["-s", serial, "push", local, AdbClient.dimmingMemoryScript], timeout: 30)
+        }
+        shell("chmod 755 \(AdbClient.dimmingMemoryScript); mkdir -p \(AdbClient.dimmingMemoryDir)")
+        return true
+    }
+
+    /// 拉起守护。返回拉起后的状态。
+    ///
+    /// adb shell 起的后台进程会一直占着本地客户端的输出管道（实测），所以这条命令
+    /// 必然超时 —— 被杀的只是**本地 adb 客户端**：脚本是 nohup 出去的，远端照常活着
+    /// （和 tools/dimming_memory/install.sh 用的是同一招），所以这里忽略结果、只看 pid 文件。
+    @discardableResult
+    func startDimmingMemoryDaemon(timeout: TimeInterval = 8) -> (running: Bool, pid: String) {
+        guard syncDimmingMemoryScript() else { return (false, "") }
+        let current = dimmingMemoryStatus()
+        if current.running { return current }   // 已经在跑就别再拉一个
+        shell("rm -f \(AdbClient.dimmingMemoryStopFile)")
+        _ = run(["-s", serial, "shell",
+                 "cd \(AdbClient.dimmingMemoryDir) && nohup sh \(AdbClient.dimmingMemoryScript) "
+                 + ">/dev/null 2>&1 </dev/null & echo started"], timeout: 3)
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            let status = dimmingMemoryStatus()
+            if status.running || Date() >= deadline { return status }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
+    /// 停下守护：写停止标记（脚本每轮都会看），等它自己退。
+    @discardableResult
+    func stopDimmingMemoryDaemon(timeout: TimeInterval = 8) -> (running: Bool, pid: String) {
+        shell("echo stop > \(AdbClient.dimmingMemoryStopFile)")
+        let deadline = Date().addingTimeInterval(timeout)
+        while true {
+            let status = dimmingMemoryStatus()
+            if !status.running {
+                shell("rm -f \(AdbClient.dimmingMemoryStopFile)")
+                return status
+            }
+            if Date() >= deadline { return status }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
     // MARK: - Jar 部署
 
     func ensureJars() {

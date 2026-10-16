@@ -85,6 +85,7 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
     message_signal = pyqtSignal(str, str, str) # type, title, text
     apk_install_finished = pyqtSignal(bool, str, str)
     guardian_status_signal = pyqtSignal(dict)
+    dimming_memory_status_signal = pyqtSignal(dict)
     auto_scan_signal = pyqtSignal()
     page_refresh_finished = pyqtSignal(str, bool)
     adb_action_finished = pyqtSignal(object, bool, str)
@@ -128,6 +129,7 @@ class App(PagesMixin, DisplayFeaturesMixin, DeviceFeaturesMixin, FluentWindow):
         self.message_signal.connect(self._show_message_box)
         self.apk_install_finished.connect(self._on_apk_install_finished)
         self.guardian_status_signal.connect(self._apply_guardian_status)
+        self.dimming_memory_status_signal.connect(self._apply_dimming_memory_daemon_status)
         self.auto_scan_signal.connect(lambda: self.scan_net(auto=True))
         self.page_refresh_finished.connect(self._finish_page_refresh)
         self.adb_action_finished.connect(self._finish_adb_action)

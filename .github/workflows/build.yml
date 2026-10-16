@@ -67,6 +67,7 @@ jobs:
           --include-data-files=assets/runtime/MtkDirectTool.jar=assets/runtime/MtkDirectTool.jar
           --include-data-files=assets/runtime/ColorfulLedTool.jar=assets/runtime/ColorfulLedTool.jar
           --include-data-files=assets/adb_guardian/adbguardian-signed.apk=assets/adb_guardian/adbguardian-signed.apk
+          --include-data-files=assets/runtime/dimming_memory.sh=assets/runtime/dimming_memory.sh
           --output-filename=MonitorToolbox.exe
           --output-dir=dist-nuitka
           --assume-yes-for-downloads
@@ -85,6 +86,7 @@ jobs:
           --include-data-files=assets/runtime/MtkDirectTool.jar=assets/runtime/MtkDirectTool.jar
           --include-data-files=assets/runtime/ColorfulLedTool.jar=assets/runtime/ColorfulLedTool.jar
           --include-data-files=assets/adb_guardian/adbguardian-signed.apk=assets/adb_guardian/adbguardian-signed.apk
+          --include-data-files=assets/runtime/dimming_memory.sh=assets/runtime/dimming_memory.sh
           --output-filename=MonitorToolbox.exe
           --output-dir=dist-nuitka-standalone
           --assume-yes-for-downloads
