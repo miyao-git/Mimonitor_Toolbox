@@ -141,6 +141,7 @@ jobs:
           test -f "$R/runtime/MtkDirectTool.jar"     || { echo "缺 MtkDirectTool.jar"; exit 1; }
           test -f "$R/runtime/ColorfulLedTool.jar"   || { echo "缺 ColorfulLedTool.jar"; exit 1; }
           test -f "$R/adb_guardian/adbguardian-signed.apk" || { echo "缺保活 apk"; exit 1; }
+          test -f "$R/runtime/dimming_memory.sh" || { echo "缺控光守护脚本"; exit 1; }
           test -f "$R/AppIcon.icns"   || { echo "缺应用图标"; exit 1; }
           # LSUIElement 必须**不是** true：设了会变成「后台型 app」，
           # 启动台 / Dock / Cmd+Tab 全看不到，用户装完找不到入口。

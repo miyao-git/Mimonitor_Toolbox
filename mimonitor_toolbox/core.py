@@ -64,6 +64,8 @@ def _load_settings_unlocked():
         "hdr_target_display_id": "",
         "local_dimming_memory": {"sdr": None, "hdr": None},
         "local_dimming_toggle_last_value": 3,
+        # 显示器端守护：连接后确认脚本在跑、没跑就拉起来（不依赖本机常驻）
+        "dimming_memory_daemon_enabled": False,
         "freesync_mode_memory_enabled": False,
         "freesync_previous_mode": None,
         "crosshair_game_mode_only": True,
@@ -207,6 +209,13 @@ GUARDIAN_ACCESSIBILITY = f"{GUARDIAN_PACKAGE}/{GUARDIAN_PACKAGE}.AdbGuardianAcce
 GUARDIAN_APK_NAME = "adbguardian-signed.apk"
 MTK_DIRECT_TOOL_NAME = "MtkDirectTool.jar"
 COLORFUL_LED_TOOL_NAME = "ColorfulLedTool.jar"
+# 显示器端「HDR/SDR 精密控光记忆」守护：常驻显示器的 shell 脚本，
+# 不依赖本机运行。设备侧路径与脚本自身（tools/dimming_memory）保持一致。
+DIMMING_MEMORY_SCRIPT_NAME = "dimming_memory.sh"
+DIMMING_MEMORY_DIR = "/sdcard/Download/Mimonitor_Toolbox"
+DIMMING_MEMORY_SCRIPT = f"{DIMMING_MEMORY_DIR}/{DIMMING_MEMORY_SCRIPT_NAME}"
+DIMMING_MEMORY_PID_FILE = f"{DIMMING_MEMORY_DIR}/dimming_memory.pid"
+DIMMING_MEMORY_STOP_FILE = f"{DIMMING_MEMORY_DIR}/dimming_memory.stop"
 MTK_BATCH_RESULT_FILE = "/sdcard/Download/Mimonitor_Toolbox/.mtk_batch_result.txt"
 XIAOMI_TO_MTK_COLOR_TEMP = {0: 1, 1: 2, 2: 3, 3: 0, 4: 4, 5: 5, 8: 6}
 MTK_TO_XIAOMI_COLOR_TEMP = {v: k for k, v in XIAOMI_TO_MTK_COLOR_TEMP.items()}
@@ -343,3 +352,10 @@ def get_mtk_direct_tool_path():
 
 def get_colorful_led_tool_path():
     return bundled_resource_path("assets", "runtime", COLORFUL_LED_TOOL_NAME)
+
+def get_dimming_memory_script_path():
+    """设备端控光守护脚本：优先打包资源，源码运行时用 tools/ 下那份。"""
+    return (
+        bundled_resource_path("assets", "runtime", DIMMING_MEMORY_SCRIPT_NAME)
+        or os.path.join(get_app_base_dir(), "tools", "dimming_memory", DIMMING_MEMORY_SCRIPT_NAME)
+    )

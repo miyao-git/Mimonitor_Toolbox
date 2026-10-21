@@ -36,6 +36,54 @@ final class AdbClientTests: XCTestCase {
         esac
         """) { client in XCTAssertNil(client.probeScannedDevice(ip: "192.168.1.40")) }
     }
+    func testDimmingMemoryScriptIsLocatable() {
+        // 开发态回退到仓库 assets/runtime（打包后走 Bundle.main）
+        XCTAssertNotNil(AdbClient.dimmingMemoryScriptPath())
+    }
+
+    func testDimmingMemoryDaemonSkipsDuplicateLaunchWhenAlreadyRunning() throws {
+        let marker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dm-launch-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+        try fake("""
+        if [ "$1" = "-s" ] && [ "$3" = "push" ]; then exit 0; fi
+        case "$3" in
+          shell)
+            case "$4" in
+              *dimming_memory.pid*) echo "running 4242" ;;
+              *nohup*) echo launched > "\(marker.path)" ;;
+            esac ;;
+        esac
+        """) { client in
+            let status = client.startDimmingMemoryDaemon(timeout: 2)
+            XCTAssertTrue(status.running)
+            XCTAssertEqual(status.pid, "4242")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+        }
+    }
+
+    func testDimmingMemoryDaemonLaunchesWhenStoppedAndPicksUpNewPid() throws {
+        let marker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dm-launch-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+        try fake("""
+        if [ "$1" = "-s" ] && [ "$3" = "push" ]; then exit 0; fi
+        case "$3" in
+          shell)
+            case "$4" in
+              *nohup*) echo launched > "\(marker.path)"; echo started ;;
+              *dimming_memory.pid*)
+                if [ -f "\(marker.path)" ]; then echo "running 777"; else echo stopped; fi ;;
+            esac ;;
+        esac
+        """) { client in
+            let status = client.startDimmingMemoryDaemon(timeout: 3)
+            XCTAssertTrue(status.running)
+            XCTAssertEqual(status.pid, "777")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+        }
+    }
+
     private func fake(_ script: String, test: (AdbClient) throws -> Void) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("preset-adb-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

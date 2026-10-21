@@ -287,5 +287,84 @@ class ConnectByDeviceStateTests(unittest.TestCase):
         self.assertEqual(state, "offline")
 
 
+class DimmingMemoryDaemonAdbTests(unittest.TestCase):
+    """显示器端控光守护的探测 / 部署 / 拉起（见 tools/dimming_memory）。"""
+
+    def test_status_reports_running_pid(self):
+        from mimonitor_toolbox import adb as adb_runtime
+
+        target = adb_runtime.Adb("192.168.1.9")
+        with mock.patch.object(adb_runtime.Adb, "shell", return_value="running 4242\r\n"):
+            status = target.dimming_memory_status()
+
+        self.assertEqual(status, {"running": True, "pid": "4242"})
+
+    def test_status_treats_stale_pid_file_as_stopped(self):
+        from mimonitor_toolbox import adb as adb_runtime
+
+        target = adb_runtime.Adb("192.168.1.9")
+        with mock.patch.object(adb_runtime.Adb, "shell", return_value="stopped\n"):
+            status = target.dimming_memory_status()
+
+        self.assertEqual(status, {"running": False, "pid": ""})
+
+    def test_sync_pushes_script_only_when_size_differs(self):
+        from mimonitor_toolbox import adb as adb_runtime
+
+        target = adb_runtime.Adb("192.168.1.9")
+        pushes = []
+        with mock.patch.object(adb_runtime, "get_dimming_memory_script_path", return_value=__file__), \
+                mock.patch.object(adb_runtime.Adb, "shell", return_value="0\n"), \
+                mock.patch.object(adb_runtime, "adb_run",
+                                  side_effect=lambda args, check=False: pushes.append(args)):
+            self.assertTrue(target.sync_dimming_memory_script())
+
+        self.assertTrue(any("push" in args for args in pushes))
+
+    def test_start_uses_detached_launch_and_survives_client_timeout(self):
+        """拉起命令会挂住本地客户端（脚本是 nohup 出去的），超时必须被吞掉。"""
+        from mimonitor_toolbox import adb as adb_runtime
+
+        target = adb_runtime.Adb("192.168.1.9")
+        launches = []
+
+        def fake_adb_run(args, timeout=10, check=False):
+            if "shell" in args:
+                launches.append(args)
+                raise RuntimeError("ADB 命令超时（3 秒）")
+            return ""
+
+        with mock.patch.object(adb_runtime, "get_dimming_memory_script_path", return_value=__file__), \
+                mock.patch.object(adb_runtime.Adb, "shell", return_value=""):
+            with mock.patch.object(adb_runtime, "adb_run", side_effect=fake_adb_run), \
+                    mock.patch.object(adb_runtime.Adb, "dimming_memory_status",
+                                      side_effect=[{"running": False, "pid": ""},
+                                                   {"running": True, "pid": "777"}]), \
+                    mock.patch.object(adb_runtime.time, "sleep", return_value=None):
+                status = target.start_dimming_memory_daemon(timeout=1)
+
+        self.assertEqual(status, {"running": True, "pid": "777"})
+        joined = " ".join(" ".join(args) for args in launches)
+        self.assertIn("nohup sh", joined)
+        self.assertIn("echo started", joined)
+
+    def test_stop_writes_flag_and_waits_for_exit(self):
+        from mimonitor_toolbox import adb as adb_runtime
+
+        target = adb_runtime.Adb("192.168.1.9")
+        shell_calls = []
+        with mock.patch.object(adb_runtime.Adb, "shell",
+                               side_effect=lambda cmd, check=False: shell_calls.append(cmd) or ""), \
+                mock.patch.object(adb_runtime.Adb, "dimming_memory_status",
+                                  side_effect=[{"running": True, "pid": "9"},
+                                               {"running": False, "pid": ""}]), \
+                mock.patch.object(adb_runtime.time, "sleep", return_value=None):
+            status = target.stop_dimming_memory_daemon(timeout=1)
+
+        self.assertFalse(status["running"])
+        self.assertTrue(any("dimming_memory.stop" in cmd and cmd.startswith("echo stop") for cmd in shell_calls))
+        self.assertTrue(any("rm -f" in cmd and "dimming_memory.stop" in cmd for cmd in shell_calls))
+
+
 if __name__ == "__main__":
     unittest.main()

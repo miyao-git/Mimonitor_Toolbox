@@ -1438,6 +1438,41 @@ class PagesMixin:
         self.hdr_memory_status_label.setTextColor(QColor(120, 120, 120), QColor(255, 255, 255, 140))
         c3_lay.addWidget(self.hdr_memory_status_label)
 
+        # 显示器端守护：记忆逻辑跑在显示器里，本机不开也能切（见 tools/dimming_memory）
+        daemon_layout = QHBoxLayout()
+        daemon_layout.setSpacing(15)
+        self.chk_dimming_memory_daemon = CheckBox(
+            "显示器端分区控光记忆（不依赖本机运行）", card3)
+        self.chk_dimming_memory_daemon.setChecked(
+            settings.get("dimming_memory_daemon_enabled", False))
+        self.chk_dimming_memory_daemon.setToolTip(
+            "把记忆逻辑跑在显示器里：显示器收到 HDR 信号时自己把精密控光切到记忆值，\n"
+            "Mac/PC 关机、拔线都不影响。勾选后每次连接会自动部署并拉起守护。\n"
+            "默认 SDR=关 / HDR=高，可在显示器 /sdcard/Download/Mimonitor_Toolbox/\n"
+            "dimming_memory.conf 里改；你在 OSD 上改控光会被自动记到当前那一侧。")
+        self.chk_dimming_memory_daemon.stateChanged.connect(self._toggle_dimming_memory_daemon)
+        daemon_layout.addWidget(self.chk_dimming_memory_daemon)
+        daemon_layout.addStretch()
+        c3_lay.addLayout(daemon_layout)
+
+        daemon_btn_row = QHBoxLayout()
+        daemon_btn_row.setSpacing(8)
+        btn_daemon_check = PushButton(FIF.SEARCH, "检测状态", card3)
+        btn_daemon_check.clicked.connect(self._check_dimming_memory_daemon_status)
+        daemon_btn_row.addWidget(btn_daemon_check)
+        btn_daemon_deploy = PrimaryPushButton(FIF.DOWNLOAD, "部署并启动", card3)
+        btn_daemon_deploy.clicked.connect(self._deploy_dimming_memory_daemon)
+        daemon_btn_row.addWidget(btn_daemon_deploy)
+        btn_daemon_stop = PushButton(FIF.CANCEL, "停止守护", card3)
+        btn_daemon_stop.clicked.connect(self._stop_dimming_memory_daemon)
+        daemon_btn_row.addWidget(btn_daemon_stop)
+        daemon_btn_row.addStretch(1)
+        c3_lay.addLayout(daemon_btn_row)
+
+        self.dimming_memory_status_label = CaptionLabel("守护状态：未检测", card3)
+        self.dimming_memory_status_label.setTextColor(QColor(120, 120, 120), QColor(255, 255, 255, 140))
+        c3_lay.addWidget(self.dimming_memory_status_label)
+
         freesync_memory_layout = QHBoxLayout()
         freesync_memory_layout.setSpacing(15)
         self.chk_freesync_mode_memory = CheckBox(

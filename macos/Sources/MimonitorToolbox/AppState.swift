@@ -103,6 +103,9 @@ final class AppState: ObservableObject {
     @Published var hdrMemoryEnabled = UserDefaults.standard.bool(forKey: "hdr_sdr_local_dimming_enabled")
     /// 显示器当前是否处于 4K UI 模式（由 check4KState 检测得到）
     @Published var is4KUI = false
+    /// 显示器端控光守护：勾选后每次连接确认它在跑，没跑就拉起来（不依赖本机常开）
+    @Published var dimmingMemoryDaemonEnabled = UserDefaults.standard.bool(forKey: "dimming_memory_daemon_enabled")
+    @Published var dimmingMemoryStatusText = "状态：未检测"
     @Published var freesyncMemoryEnabled = UserDefaults.standard.bool(forKey: "freesync_mode_memory_enabled")
     @Published var hdrMemoryStatusText = ""
     @Published var freesyncMemoryStatusText = ""
@@ -335,6 +338,7 @@ final class AppState: ObservableObject {
                         self.refreshPage("game")
                         self.pollHdrState(force: true)
                         self.checkAutomaticTasks()
+                        self.ensureDimmingMemoryDaemon()
                     } else {
                         self.log("ADB 链路已恢复")
                     }
@@ -511,6 +515,7 @@ final class AppState: ObservableObject {
                     self.check4KState()
                     // 原版连接后还会检测保活守护状态（QTimer 1800ms）
                     self.checkGuardian()
+                    self.ensureDimmingMemoryDaemon()
                     self.refreshMediaVolumeState()
                 }
             } else {
@@ -1630,6 +1635,89 @@ final class AppState: ObservableObject {
             mask: mask,
             stopped: stopped
         )
+    }
+
+    // MARK: - 显示器端「HDR/SDR 精密控光记忆」守护
+
+    // 与上一节不同：记忆逻辑跑在**显示器里**（shell 脚本常驻，盯 picture_mode），
+    // 不依赖这台 Mac 常开。这里只负责连接后补拉、以及界面上的状态显示。
+    func toggleDimmingMemoryDaemon(_ enabled: Bool) {
+        dimmingMemoryDaemonEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "dimming_memory_daemon_enabled")
+        log("显示器端分区控光记忆: \(enabled ? "开启" : "关闭")")
+        if enabled {
+            ensureDimmingMemoryDaemon()
+        } else if isConnected {
+            checkDimmingMemoryStatus()
+        } else {
+            dimmingMemoryStatusText = "状态：未检测（未连接）"
+        }
+    }
+
+    /// 连接后调用：开关开着且守护没跑，就把它拉起来（后台队列，不阻塞连接流程）
+    func ensureDimmingMemoryDaemon() {
+        guard isConnected, dimmingMemoryDaemonEnabled else { return }
+        runBackground {
+            if !self.adb.dimmingMemoryStatus().running {
+                DispatchQueue.main.async { self.log("显示器端控光守护未运行，正在拉起...") }
+                let status = self.adb.startDimmingMemoryDaemon()
+                DispatchQueue.main.async {
+                    self.log(status.running
+                             ? "显示器端控光守护已启动（pid \(status.pid)）"
+                             : "显示器端控光守护拉起失败（看 /sdcard/Download/Mimonitor_Toolbox/dimming_memory.log）")
+                }
+            }
+            self.refreshDimmingMemoryStatus()
+        }
+    }
+
+    func checkDimmingMemoryStatus() {
+        guard isConnected else { return log("请先连接显示器") }
+        dimmingMemoryStatusText = "状态：正在检测..."
+        runBackground { self.refreshDimmingMemoryStatus() }
+    }
+
+    func deployDimmingMemoryDaemon() {
+        guard isConnected else { return log("请先连接显示器") }
+        dimmingMemoryStatusText = "状态：正在部署并启动..."
+        runBackground {
+            let status = self.adb.startDimmingMemoryDaemon()
+            DispatchQueue.main.async {
+                self.log(status.running
+                         ? "显示器端控光守护已启动（pid \(status.pid)）"
+                         : "显示器端控光守护启动失败")
+            }
+            self.refreshDimmingMemoryStatus()
+        }
+    }
+
+    func stopDimmingMemoryDaemon() {
+        guard isConnected else { return log("请先连接显示器") }
+        dimmingMemoryStatusText = "状态：正在停止..."
+        runBackground {
+            let status = self.adb.stopDimmingMemoryDaemon()
+            DispatchQueue.main.async {
+                self.log(status.running ? "控光守护停止超时，进程仍在" : "显示器端控光守护已停止")
+            }
+            self.refreshDimmingMemoryStatus()
+        }
+    }
+
+    /// 后台队列上使用：读状态并回主线程更新文案
+    private func refreshDimmingMemoryStatus() {
+        let status = self.adb.dimmingMemoryStatus()
+        let enabled = self.dimmingMemoryDaemonEnabled
+        DispatchQueue.main.async {
+            if status.running {
+                self.dimmingMemoryStatusText = enabled
+                    ? "状态：显示器端守护运行中（pid \(status.pid)）"
+                    : "状态：守护运行中（pid \(status.pid)），但开关未开（不会自动补拉）"
+            } else if enabled {
+                self.dimmingMemoryStatusText = "状态：守护未运行（下次连接自动拉起）"
+            } else {
+                self.dimmingMemoryStatusText = "状态：守护未运行"
+            }
+        }
     }
 
     // MARK: - HDR / SDR 分区控光记忆
